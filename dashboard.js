@@ -432,7 +432,7 @@ chrome.storage.onChanged.addListener((changes, area) => {
     document.documentElement.dataset.theme = changes.theme.newValue || 'default'
     renderThemeButtons(changes.theme.newValue || 'default')
   }
-  if (['theme', 'recentItems', 'snapshotCache', 'pairingKey'].some((key) => changes[key])) {
+  if (['theme', 'recentItems', 'snapshotCache', 'customCollections', 'pairingKey'].some((key) => changes[key])) {
     if (!refreshPending) {
       refreshPending = true
       setTimeout(() => {

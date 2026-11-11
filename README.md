@@ -71,6 +71,8 @@
 
 ## 📋 Prerequisites
 
+Collection loading and cache recovery are documented in [Collection visibility and extension sync](../docs/collection-sync.md). The extension gets an encrypted collection snapshot from the unlocked website; if a snapshot is not configured or the network is temporarily unavailable, it preserves its account-matched cache instead of clearing it.
+
 * **Browser**: Google Chrome, Brave, Microsoft Edge, Opera, Vivaldi, or any Chromium-based browser supporting Manifest V3.
 * **Vault Account**: An active account on [Markanm Vault](https://vault.markanm.com) (or your self-hosted Vault instance).
 

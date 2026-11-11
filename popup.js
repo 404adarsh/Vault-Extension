@@ -181,5 +181,5 @@ quickForm.addEventListener('submit',async(event)=>{
 })
 $('#bookmark-filter').addEventListener('change',()=>renderBookmarks(savedBookmarks,savedCollections))
 $('#refresh-bookmarks').addEventListener('click',()=>void refresh())
-chrome.storage.onChanged.addListener((changes,area)=>{if(area!=='local')return;if(['recentItems','snapshotCache','theme','pairingKey'].some((key)=>changes[key])){if(changes.theme){document.documentElement.dataset.theme=changes.theme.newValue||'default';renderThemes(changes.theme.newValue||'default')}if(!refreshQueued){refreshQueued=true;setTimeout(()=>{refreshQueued=false;void refresh()},50)}}})
+chrome.storage.onChanged.addListener((changes,area)=>{if(area!=='local')return;if(['recentItems','snapshotCache','customCollections','theme','pairingKey'].some((key)=>changes[key])){if(changes.theme){document.documentElement.dataset.theme=changes.theme.newValue||'default';renderThemes(changes.theme.newValue||'default')}if(!refreshQueued){refreshQueued=true;setTimeout(()=>{refreshQueued=false;void refresh()},50)}}})
 void applyPreferences().then(refresh)

@@ -180,18 +180,35 @@ async function sendCapture(capture) {
   return cipher
 }
 
+async function pairingOwner(key) {
+  const digest = new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(key)))
+  const owner = Array.from(digest, (byte) => byte.toString(16).padStart(2, '0')).join('')
+  digest.fill(0)
+  return owner
+}
+
+function mergeCollectionsById(primary, additional) {
+  const merged = new Map()
+  for (const collection of [...primary, ...additional]) {
+    if (collection && typeof collection.id === 'string' && typeof collection.title === 'string' && !merged.has(collection.id)) {
+      merged.set(collection.id, { ...collection, parentId: typeof collection.parentId === 'string' ? collection.parentId : null })
+    }
+  }
+  return [...merged.values()]
+}
+
 async function fetchCollections() {
   const settings = await chrome.storage.local.get(['pairingKey', 'apiOrigin'])
   if (!settings.pairingKey) throw new Error('Create a Vault account or sign in, then pair this extension from Settings → Browser extension.')
-  const fingerprintBytes = new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(settings.pairingKey)))
-  const owner = Array.from(fingerprintBytes, (byte) => byte.toString(16).padStart(2, '0')).join('')
-  fingerprintBytes.fill(0)
-  const stored = await chrome.storage.local.get(['snapshotCache', 'snapshotCacheOwner', 'customCollections'])
+  const owner = await pairingOwner(settings.pairingKey)
+  const stored = await chrome.storage.local.get(['snapshotCache', 'snapshotCacheOwner', 'customCollections', 'customCollectionsOwner'])
   const cached = stored.snapshotCacheOwner === owner && stored.snapshotCache ? stored.snapshotCache : { collections: [], bookmarks: [] }
+  const customOwner = stored.customCollectionsOwner || (stored.snapshotCacheOwner === owner ? owner : null)
+  const custom = customOwner === owner && Array.isArray(stored.customCollections) ? stored.customCollections : []
   const apiOrigin = settings.apiOrigin || PRODUCTION_API
   try {
     const controller = new AbortController()
-    const timeout = setTimeout(() => controller.abort(), 2000)
+    const timeout = setTimeout(() => controller.abort(), 12000)
     let response
     try {
       response = await fetch(`${apiOrigin}/api/extension/collections`, { headers: { 'Authorization': `Bearer ${settings.pairingKey}` }, signal: controller.signal })
@@ -200,28 +217,48 @@ async function fetchCollections() {
     }
     const result = await response.json().catch(() => ({}))
     if (!response.ok) throw new Error(result.message || result.error || result.data?.message || 'Unable to load Vault collections.')
-    const decoded = result.data?.cipher ? await decryptWithPairKey(result.data.cipher, settings.pairingKey) : null
-    let serverCollections = Array.isArray(decoded)
-      ? decoded.filter((entry) => typeof entry.id === 'string' && typeof entry.title === 'string')
-      : (Array.isArray(decoded?.collections) ? decoded.collections.filter((entry) => typeof entry.id === 'string' && typeof entry.title === 'string').map((entry) => ({ ...entry, parentId: typeof entry.parentId === 'string' ? entry.parentId : null })) : [])
+    if (!result.data?.cipher) {
+      return {
+        ...cached,
+        collections: mergeCollectionsById(cached.collections || [], custom),
+        bookmarks: cached.bookmarks || [],
+        credentialFingerprints: cached.credentialFingerprints || [],
+        stale: true,
+        error: 'Vault has not synced its collection list to this extension yet. Open the Vault website while signed in, then refresh.',
+      }
+    }
+
+    const decoded = await decryptWithPairKey(result.data.cipher, settings.pairingKey)
+    const isLegacyArray = Array.isArray(decoded)
+    if (!isLegacyArray && (!decoded || typeof decoded !== 'object' || !Array.isArray(decoded.collections))) {
+      throw new Error('Vault returned an invalid collection snapshot. Your previous extension cache was kept.')
+    }
+    const serverCollections = (isLegacyArray ? decoded : decoded.collections || [])
+      .filter((entry) => typeof entry.id === 'string' && typeof entry.title === 'string')
+      .map((entry) => ({ ...entry, parentId: typeof entry.parentId === 'string' ? entry.parentId : null }))
     const serverBookmarks = Array.isArray(decoded?.bookmarks) ? decoded.bookmarks.filter((entry) => typeof entry.id === 'string' && typeof entry.title === 'string' && typeof entry.url === 'string' && /^https?:\/\//i.test(entry.url)) : []
     const credentialFingerprints = Array.isArray(decoded?.credentialFingerprints) ? decoded.credentialFingerprints.filter((entry) => typeof entry === 'string') : []
 
-    // Merge any locally created collections
-    const custom = Array.isArray(stored.customCollections) ? stored.customCollections : []
-    const mergedCollections = [...serverCollections]
-    for (const c of custom) {
-      // Names are not unique: nested collections can have the same title.
-      // Only IDs identify the same collection.
-      if (!mergedCollections.some((sc) => sc.id === c.id)) {
-        mergedCollections.push(c)
-      }
-    }
+    // Retain extension-created folders only until the website confirms them.
+    const serverIds = new Set(serverCollections.map((entry) => entry.id))
+    const pendingCustom = custom.filter((entry) => !serverIds.has(entry.id))
+    const mergedCollections = mergeCollectionsById(serverCollections, pendingCustom)
     const fresh = { collections: mergedCollections, bookmarks: serverBookmarks, credentialFingerprints }
-    if (JSON.stringify(fresh) !== JSON.stringify(cached)) await chrome.storage.local.set({ snapshotCache: fresh, snapshotCacheOwner: owner })
+    await chrome.storage.local.set({
+      snapshotCache: fresh,
+      snapshotCacheOwner: owner,
+      customCollections: pendingCustom,
+      customCollectionsOwner: owner,
+    })
     return fresh
   } catch (error) {
-    if (cached.collections.length || cached.bookmarks.length) return { ...cached, stale: true, error: error instanceof Error ? error.message : 'Unable to load current Vault collections.' }
+    if (cached.collections.length || cached.bookmarks.length || custom.length) return {
+      ...cached,
+      collections: mergeCollectionsById(cached.collections || [], custom),
+      bookmarks: cached.bookmarks || [],
+      stale: true,
+      error: error instanceof Error ? error.message : 'Unable to load current Vault collections.',
+    }
     throw error
   }
 }
@@ -276,20 +313,24 @@ chrome.runtime.onMessage.addListener((message, sender, respond) => {
         respond({ ok: false, error: 'Enter a collection name.' })
         return
       }
-      const settings = await chrome.storage.local.get(['pairingKey', 'apiOrigin', 'customCollections', 'snapshotCache'])
+      const settings = await chrome.storage.local.get(['pairingKey', 'apiOrigin', 'customCollections', 'snapshotCache', 'snapshotCacheOwner', 'customCollectionsOwner'])
       if (!settings.pairingKey) {
         respond({ ok: false, error: 'Pair the extension from Vault settings first.' })
         return
       }
+      const owner = await pairingOwner(settings.pairingKey)
       const id = Array.from(crypto.getRandomValues(new Uint8Array(16)), (b) => b.toString(16).padStart(2, '0')).join('')
       const newCol = { id, title, parentId: null }
-      const custom = Array.isArray(settings.customCollections) ? settings.customCollections : []
+      const customOwner = settings.customCollectionsOwner || (settings.snapshotCacheOwner === owner ? owner : null)
+      const custom = customOwner === owner && Array.isArray(settings.customCollections) ? settings.customCollections : []
       const nextCustom = [...custom.filter((c) => c.id !== id), newCol]
-      const snapshot = settings.snapshotCache || { collections: [], bookmarks: [] }
-      const nextCols = [...(snapshot.collections || []).filter((c) => c.id !== id), newCol]
+      const snapshot = settings.snapshotCacheOwner === owner && settings.snapshotCache ? settings.snapshotCache : { collections: [], bookmarks: [] }
+      const nextCols = mergeCollectionsById(snapshot.collections || [], [newCol])
       await chrome.storage.local.set({
         customCollections: nextCustom,
-        snapshotCache: { ...snapshot, collections: nextCols }
+        customCollectionsOwner: owner,
+        snapshotCache: { ...snapshot, collections: nextCols },
+        snapshotCacheOwner: owner,
       })
       try {
         const capture = {
@@ -310,7 +351,7 @@ chrome.runtime.onMessage.addListener((message, sender, respond) => {
   }
   if (message?.type === 'vault-unpair') {
     void Promise.all([
-      chrome.storage.local.remove(['pairingKey', 'snapshotCache', 'snapshotCacheOwner', 'recentItems', 'savedCredentialFingerprints']),
+      chrome.storage.local.remove(['pairingKey', 'snapshotCache', 'snapshotCacheOwner', 'customCollections', 'customCollectionsOwner', 'recentItems', 'savedCredentialFingerprints']),
       chrome.storage.session.remove('pendingCredentialPrompts'),
     ]).then(() => respond({ ok: true }))
     return true
