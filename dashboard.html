@@ -1,0 +1,143 @@
+<!doctype html>
+<html lang="en" data-theme="default">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="color-scheme" content="light dark">
+    <title>Markanm Vault — Extension Dashboard</title>
+    <link rel="stylesheet" href="dashboard.css">
+  </head>
+  <body>
+    <div class="app">
+      <aside class="sidebar">
+        <div class="brand">
+          <img src="icons/icon-192.png" alt="">
+          <strong>Markanm Vault</strong>
+        </div>
+        <button class="nav active" data-collection="">All saved items</button>
+        <div style="display:flex;justify-content:space-between;align-items:center;padding:12px 14px 4px;">
+          <span class="sidebar-title" style="padding:0;margin:0;">Collections</span>
+          <button id="dashboard-new-col-btn" type="button" class="action-btn" style="padding:2px 8px;font-size:11px;" title="Create collection">+ New</button>
+        </div>
+        <div id="dashboard-new-col-row" hidden style="padding:4px 12px;display:flex;gap:4px;">
+          <input id="dashboard-new-col-input" type="text" placeholder="Collection name" style="width:100%;padding:5px 8px;font-size:11px;border-radius:4px;border:1px solid var(--border);background:var(--surface);color:var(--text);">
+          <button id="dashboard-new-col-add" type="button" class="primary-btn" style="padding:4px 8px;font-size:11px;">Add</button>
+          <button id="dashboard-new-col-cancel" type="button" class="action-btn" style="padding:4px 6px;font-size:11px;">✕</button>
+        </div>
+        <nav id="collections"></nav>
+        <button class="nav" id="settings-open">Settings & effects</button>
+        <button class="nav" id="refresh">Refresh</button>
+        <div class="sidebar-status-box" id="sidebar-status-box">
+          <span class="status-dot" id="sidebar-indicator"></span>
+          <span id="sidebar-status-text">Checking...</span>
+        </div>
+        <p class="sidebar-note">Secrets are encrypted locally before upload.</p>
+      </aside>
+      <main class="main">
+        <header class="topbar">
+          <div>
+            <p class="eyebrow">BROWSER EXTENSION</p>
+            <h1>Your saved items</h1>
+          </div>
+          <div class="tools">
+            <input id="search" type="search" placeholder="Search title or website" aria-label="Search saved items">
+            <div class="toggle">
+              <button id="grid-toggle" aria-pressed="true">Grid</button>
+              <button id="list-toggle" aria-pressed="false">List</button>
+            </div>
+          </div>
+        </header>
+
+        <p id="status" role="status" aria-live="polite">Loading your encrypted snapshot...</p>
+
+        <!-- Unpaired Setup & Connect Card -->
+        <section id="pairing-card" class="pairing-card" hidden>
+          <div class="pairing-card-header">
+            <span class="pairing-badge">Extension Not Connected</span>
+            <h2>Connect to Markanm Vault</h2>
+            <p>Pair this browser extension with your Markanm Vault account to load bookmarks and automatically sync saved credentials.</p>
+          </div>
+          <div class="pairing-form-box">
+            <label for="pairing-key-input" class="field-label">Extension Pairing Key</label>
+            <div class="pairing-input-group">
+              <input id="pairing-key-input" type="password" placeholder="Paste your 43-character pairing key" autocomplete="off" spellcheck="false">
+              <button id="pairing-paste-btn" type="button" title="Paste from clipboard">Paste</button>
+              <button id="pairing-connect-btn" class="primary" type="button">Connect Extension</button>
+            </div>
+            <div id="pairing-message" class="pairing-message" role="alert" hidden></div>
+          </div>
+          <div class="pairing-instructions">
+            <h3>How to get your pairing key:</h3>
+            <ol>
+              <li>Open <strong>Markanm Vault</strong> in your browser.</li>
+              <li>Go to <strong>Settings → Browser extension</strong>.</li>
+              <li>Click <strong>Create extension pairing key</strong> (or <strong>Copy key</strong> if already generated).</li>
+              <li>Paste the key above and click <strong>Connect Extension</strong>.</li>
+            </ol>
+            <div class="pairing-actions-row">
+              <button id="open-vault-btn" class="primary" type="button">Open Markanm Vault Settings ↗</button>
+            </div>
+          </div>
+        </section>
+
+        <section id="items" class="items grid" aria-live="polite"></section>
+
+        <!-- Settings Backdrop and Panel -->
+        <div id="settings-backdrop" class="settings-backdrop" hidden></div>
+        <aside id="settings-panel" hidden>
+          <div class="settings-head">
+            <div>
+              <p class="eyebrow">PREFERENCES</p>
+              <h2>Theme and save effects</h2>
+            </div>
+            <button id="settings-close" class="close-btn" aria-label="Close settings">Close ✕</button>
+          </div>
+
+          <div class="settings-section">
+            <h3>Vault Connection</h3>
+            <div class="connection-status-row">
+              <span class="status-dot" id="settings-status-indicator"></span>
+              <strong id="settings-connection-label">Checking connection...</strong>
+            </div>
+            <div id="settings-unpaired-box">
+              <label for="settings-key-input" class="field-label">Pairing Key</label>
+              <div class="pairing-input-group">
+                <input id="settings-key-input" type="password" placeholder="Paste 43-character pairing key" autocomplete="off" spellcheck="false">
+                <button id="settings-connect-btn" class="primary" type="button">Connect</button>
+              </div>
+              <div id="settings-pairing-message" class="pairing-message" role="alert" hidden></div>
+            </div>
+            <div class="settings-actions-row">
+              <button id="settings-disconnect-btn" class="danger" type="button" hidden>Disconnect extension</button>
+              <button id="settings-open-vault-btn" class="secondary" type="button">Open Vault Settings ↗</button>
+            </div>
+          </div>
+
+          <div class="settings-section">
+            <h3>Theme</h3>
+            <div id="theme-picker" class="theme-picker" role="group" aria-label="Choose theme"></div>
+          </div>
+
+          <div class="settings-section">
+            <label for="effect-select">Save animation</label>
+            <select id="effect-select">
+              <option value="matrix">Matrix Rain</option>
+              <option value="glitch">Glitch</option>
+              <option value="particles">Particles</option>
+              <option value="scanlines">Scanlines</option>
+              <option value="confetti">Confetti</option>
+              <option value="three">Three.js animation</option>
+              <option value="none">None</option>
+            </select>
+
+            <label for="duration">Duration: <output id="duration-value">2s</output></label>
+            <input id="duration" type="range" min="1" max="5" value="2">
+
+            <label class="check"><input id="reduce-motion" type="checkbox"> Reduce motion (also follows system preference)</label>
+          </div>
+        </aside>
+      </main>
+    </div>
+    <script type="module" src="dashboard.js"></script>
+  </body>
+</html>

@@ -1,0 +1,54 @@
+<!doctype html>
+<html lang="en" data-theme="default">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="color-scheme" content="light dark">
+    <title>Markanm Vault Quick Save</title>
+    <link rel="stylesheet" href="popup.css">
+  </head>
+  <body>
+    <main>
+      <header><img class="brand-icon" src="icons/favicon-32.png" alt=""><div><strong>Markanm Vault</strong><small>Quick Save</small></div><button id="open-dashboard" type="button" aria-label="Open full dashboard">Dashboard ↗</button></header>
+      <div class="theme-row"><label>Theme</label><div id="theme-picker" class="theme-picker" role="group" aria-label="Choose theme"></div><button id="close-popup" class="quiet" type="button" aria-label="Close popup">Close</button></div>
+      <div class="toolbar"><button id="toggle-quick" class="primary" type="button">＋ Quick save</button><button id="toggle-settings" class="quiet" type="button">Effects & settings</button></div>
+      <section id="settings" hidden>
+        <label for="effect-select">Save animation</label><select id="effect-select"><option value="matrix">Matrix Rain</option><option value="glitch">Glitch</option><option value="particles">Particles</option><option value="scanlines">Scanlines</option><option value="confetti">Confetti</option><option value="three">Three.js animation</option><option value="none">None</option></select>
+        <label for="duration">Effect duration: <output id="duration-value">2s</output></label><input id="duration" type="range" min="1" max="5" value="2">
+        <label class="always"><input id="reduce-motion" type="checkbox"><span>Reduce motion</span></label>
+        <label class="always"><input id="always" type="checkbox"><span>Always save submitted passwords</span></label>
+        <label for="key">Extension pairing key</label>
+        <div class="toolbar"><input id="key" type="password" autocomplete="off" spellcheck="false" placeholder="Paste pairing key from Vault"><button id="paste-key" type="button" title="Paste from clipboard">Paste</button></div>
+        <div class="toolbar"><button id="pair" class="primary" type="button">Connect extension</button><button id="disconnect" class="quiet" type="button" hidden>Disconnect</button></div>
+        <button id="popup-open-vault" class="quiet full-btn" type="button">Open Vault Settings ↗</button>
+      </section>
+      <form id="quick-form" hidden>
+        <label for="item-type">Save as</label><select id="item-type"><option value="bookmark">Website / video bookmark</option><option value="password">Password</option><option value="api-key">API key</option><option value="token">Token</option><option value="database">Database credentials</option><option value="ssh">SSH credential</option><option value="wifi">Wi-Fi credential</option><option value="note">Secure note</option><option value="custom">Custom</option></select>
+        <label for="title">Title</label><input id="title" required maxlength="160" placeholder="e.g. Production server">
+        <label for="url">Website or service URL</label><input id="url" type="url" maxlength="2000" placeholder="https://example.com">
+        <label for="description">Description <small>(optional)</small></label><textarea id="description" rows="2" maxlength="4000" placeholder="What do you want to remember?"></textarea>
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-top:6px;"><label for="collection" style="margin:0;">Collection</label><button id="popup-new-col-btn" type="button" class="quiet" style="padding:0;font-size:11px;">+ New</button></div>
+        <select id="collection"><option value="">No collection</option></select>
+        <div id="popup-new-col-row" class="toolbar" hidden style="margin-top:4px;">
+          <input id="popup-new-col-input" type="text" placeholder="Collection name" maxlength="160">
+          <button id="popup-new-col-add" class="primary" type="button">Add</button>
+          <button id="popup-new-col-cancel" type="button">✕</button>
+        </div>
+        <label for="username">Username or identifier</label><input id="username" maxlength="255" autocomplete="off">
+        <label for="secret">Password, key, or secret</label><textarea id="secret" rows="2" autocomplete="off"></textarea>
+        <label for="field-name">Another field name <small>(optional)</small></label><input id="field-name" maxlength="100" placeholder="e.g. Recovery code">
+        <label for="field-value">Another field value</label><input id="field-value" maxlength="10000" autocomplete="off">
+        <button class="primary" type="submit">Encrypt and save</button>
+      </form>
+      <section id="bookmarks-panel" hidden>
+        <div class="bookmark-heading"><strong>Recent items</strong><button id="refresh-bookmarks" type="button">Refresh</button></div>
+        <label for="bookmark-filter">Collection</label><select id="bookmark-filter"><option value="">All collections</option></select>
+        <div id="bookmarks" class="bookmarks-list"></div>
+      </section>
+      <div id="save-animation-wrap" hidden><canvas id="save-animation" width="64" height="64" aria-label="Save status animation"></canvas></div>
+      <p id="status" role="status" aria-live="polite">Pair the extension to see collections and recent saves.</p>
+      <small class="note">Secrets are encrypted before upload. The extension only keeps a local encrypted copy of recent captures.</small>
+    </main>
+    <script type="module" src="popup.js"></script>
+  </body>
+</html>

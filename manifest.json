@@ -1,0 +1,33 @@
+{
+  "manifest_version": 3,
+  "name": "Markanm Vault — Quick Save",
+  "version": "1.4.0",
+  "description": "Save website links and submitted passwords to your encrypted Markanm Vault.",
+  "permissions": ["storage", "activeTab", "contextMenus"],
+  "host_permissions": ["https://vault.markanm.com/*", "http://localhost:*/*", "http://127.0.0.1:*/*"],
+  "content_security_policy": { "extension_pages": "script-src 'self'; object-src 'self'; img-src 'self' https: data:" },
+  "icons": {
+    "16": "icons/favicon-16.png",
+    "32": "icons/favicon-32.png",
+    "192": "icons/icon-192.png",
+    "512": "icons/icon-512.png"
+  },
+  "web_accessible_resources": [{
+    "resources": ["vendor/three-animation.js", "effects.js", "content-ui.css"],
+    "matches": ["http://*/*", "https://*/*"]
+  }],
+  "background": { "service_worker": "background.js" },
+  "action": {
+    "default_title": "Markanm Vault Quick Save",
+    "default_popup": "popup.html",
+    "default_icon": {
+      "16": "icons/favicon-16.png",
+      "32": "icons/favicon-32.png"
+    }
+  },
+  "content_scripts": [{
+    "matches": ["http://*/*", "https://*/*"],
+    "js": ["content.js"],
+    "run_at": "document_idle"
+  }]
+}
