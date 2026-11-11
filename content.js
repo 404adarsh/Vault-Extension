@@ -419,9 +419,10 @@
     window.addEventListener('markanm-vault-ping-extension', announceStatus)
     window.addEventListener('markanm-vault-pair-extension', async (event) => {
       const key = event.detail?.key
+      const apiOrigin = event.detail?.apiOrigin
       if (!key) return
       try {
-        const result = await chrome.runtime.sendMessage({ type: 'vault-pair', key })
+        const result = await chrome.runtime.sendMessage({ type: 'vault-pair', key, apiOrigin })
         window.dispatchEvent(new CustomEvent('markanm-vault-pair-result', { detail: result }))
         if (result?.ok) showToast('Markanm Vault extension connected successfully!')
       } catch (err) {
