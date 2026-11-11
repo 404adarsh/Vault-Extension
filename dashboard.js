@@ -49,9 +49,11 @@ function renderCollections() {
   const root = $('#collections')
   root.replaceChildren()
   const byId = new Map(collections.map((entry) => [entry.id, entry]))
-  const path = (entry) => {
+  const path = (entry, seen = new Set()) => {
+    if (seen.has(entry.id)) return entry.title
+    seen.add(entry.id)
     const parent = entry.parentId ? byId.get(entry.parentId) : null
-    return parent ? `${path(parent)} / ${entry.title}` : entry.title
+    return parent ? `${path(parent, seen)} / ${entry.title}` : entry.title
   }
   for (const collection of [...collections].sort((a, b) => path(a).localeCompare(path(b)))) {
     const button = document.createElement('button')
@@ -300,8 +302,8 @@ async function refresh() {
   renderCollections()
   renderItems()
   $('#status').textContent = snapshot.stale
-    ? `Showing cached data. ${snapshot.error}`
-    : `${entries.length} items shown. Bookmarks sync after pending captures are imported into Vault.`
+    ? `Showing cached data (${collections.length} collections). ${snapshot.error}`
+    : `${collections.length} collections · ${entries.length} items shown.`
   document.body.classList.add('ready')
 }
 

@@ -78,13 +78,13 @@ async function refresh() {
   if(merged.remaining.length!==(local.recentItems||[]).length)await chrome.storage.local.set({recentItems:merged.remaining})
   const selected=$('#collection').value;$('#collection').replaceChildren(new Option('No collection',''))
   const collectionById=new Map(savedCollections.map((entry)=>[entry.id,entry]))
-  const collectionPath=(entry)=>entry.parentId&&collectionById.has(entry.parentId)?`${collectionPath(collectionById.get(entry.parentId))} / ${entry.title}`:entry.title
+  const collectionPath=(entry,seen=new Set())=>{if(seen.has(entry.id))return entry.title;seen.add(entry.id);return entry.parentId&&collectionById.has(entry.parentId)?`${collectionPath(collectionById.get(entry.parentId),seen)} / ${entry.title}`:entry.title}
   for(const collection of savedCollections)$('#collection').add(new Option(collectionPath(collection),collection.id))
   if(savedCollections.some((collection)=>collection.id===selected))$('#collection').value=selected
   const filter=$('#bookmark-filter').value;$('#bookmark-filter').replaceChildren(new Option('All collections',''))
   for(const collection of savedCollections)$('#bookmark-filter').add(new Option(collectionPath(collection),collection.id))
   if(savedCollections.some((collection)=>collection.id===filter))$('#bookmark-filter').value=filter
-  status.textContent=result.stale?`Using saved collection data. ${result.error}`:'Connected. Save this page, choose a collection, or review recent items.'
+  status.textContent=result.stale?`Using saved collection data (${savedCollections.length} collections). ${result.error}`:`Connected · ${savedCollections.length} collections. Save this page or review recent items.`
   renderBookmarks(savedBookmarks,savedCollections);document.body.classList.add('ready')
 }
 function renderBookmarks(items,collections) {

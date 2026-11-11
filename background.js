@@ -32,15 +32,38 @@ function toBase64(bytes) {
   return btoa(binary)
 }
 
+async function credentialFingerprint(capture, keyText) {
+  const username = String(capture?.username || '').trim().toLowerCase()
+  const password = String(capture?.password || '')
+  if (!username || !password) return null
+  let hostname
+  try { hostname = new URL(String(capture.url || '')).hostname.toLowerCase().replace(/^www\./, '') } catch { return null }
+  const rawKey = decodeKey(keyText)
+  if (rawKey.byteLength !== 32) throw new Error('Pairing key is invalid. Re-pair the extension from Vault settings.')
+  const data = new TextEncoder().encode(`vault:credential-fingerprint:v1\n${hostname}\n${username}\n${password}`)
+  try {
+    const key = await crypto.subtle.importKey('raw', rawKey, { name: 'HMAC', hash: 'SHA-256' }, false, ['sign'])
+    const digest = new Uint8Array(await crypto.subtle.sign('HMAC', key, data))
+    try { return toBase64(digest).replaceAll('+', '-').replaceAll('/', '_').replace(/=+$/, '') } finally { digest.fill(0) }
+  } finally {
+    rawKey.fill(0)
+    data.fill(0)
+  }
+}
+
 async function cacheRecentCapture(capture, cipher) {
-  const { recentItems = [] } = await chrome.storage.local.get('recentItems')
+  const { recentItems = [], pairingKey, savedCredentialFingerprints = [] } = await chrome.storage.local.get(['recentItems', 'pairingKey', 'savedCredentialFingerprints'])
+  const fingerprint = capture?.type === 'password' && pairingKey ? await credentialFingerprint(capture, pairingKey) : null
   const recent = {
     id: crypto.randomUUID(), type: String(capture?.type || 'custom'),
     title: String(capture?.title || 'Saved item').slice(0, 160),
     url: String(capture?.url || '').slice(0, 2000), collectionId: capture?.collectionId || null,
     createdAt: Date.now(), cipher,
   }
-  await chrome.storage.local.set({ recentItems: [recent, ...recentItems].slice(0, 30) })
+  await chrome.storage.local.set({
+    recentItems: [recent, ...recentItems].slice(0, 30),
+    ...(fingerprint ? { savedCredentialFingerprints: [...new Set([...savedCredentialFingerprints, fingerprint])].slice(-5000) } : {}),
+  })
 }
 
 async function stageCredentialCapture(capture) {
@@ -59,6 +82,30 @@ async function stageCredentialCapture(capture) {
 async function deleteStagedCredential(id) {
   const { pendingCredentialPrompts = [] } = await chrome.storage.session.get('pendingCredentialPrompts')
   await chrome.storage.session.set({ pendingCredentialPrompts: pendingCredentialPrompts.filter((entry) => entry.id !== id) })
+}
+
+async function credentialAlreadySaved(capture, keyText) {
+  const fingerprint = await credentialFingerprint(capture, keyText)
+  if (!fingerprint) return false
+  const [snapshot, stored] = await Promise.all([
+    fetchCollections().catch(() => null),
+    chrome.storage.local.get(['savedCredentialFingerprints', 'recentItems']),
+  ])
+  const known = new Set([
+    ...(Array.isArray(snapshot?.credentialFingerprints) ? snapshot.credentialFingerprints : []),
+    ...(Array.isArray(stored.savedCredentialFingerprints) ? stored.savedCredentialFingerprints : []),
+  ])
+  if (known.has(fingerprint)) return true
+  // Older extension saves predate fingerprint caching. Their local copies are
+  // encrypted, so compare them only after decrypting in the paired extension.
+  for (const recent of Array.isArray(stored.recentItems) ? stored.recentItems : []) {
+    if (recent.type !== 'password' || !recent.cipher) continue
+    try {
+      const savedCapture = await decryptWithPairKey(recent.cipher, keyText)
+      if (await credentialFingerprint(savedCapture, keyText) === fingerprint) return true
+    } catch { /* Ignore malformed or obsolete local cache entries. */ }
+  }
+  return false
 }
 
 async function captureToCipher(capture, keyText) {
@@ -143,7 +190,14 @@ async function fetchCollections() {
   const cached = stored.snapshotCacheOwner === owner && stored.snapshotCache ? stored.snapshotCache : { collections: [], bookmarks: [] }
   const apiOrigin = settings.apiOrigin || PRODUCTION_API
   try {
-    const response = await fetch(`${apiOrigin}/api/extension/collections`, { headers: { 'Authorization': `Bearer ${settings.pairingKey}` } })
+    const controller = new AbortController()
+    const timeout = setTimeout(() => controller.abort(), 2000)
+    let response
+    try {
+      response = await fetch(`${apiOrigin}/api/extension/collections`, { headers: { 'Authorization': `Bearer ${settings.pairingKey}` }, signal: controller.signal })
+    } finally {
+      clearTimeout(timeout)
+    }
     const result = await response.json().catch(() => ({}))
     if (!response.ok) throw new Error(result.message || result.error || result.data?.message || 'Unable to load Vault collections.')
     const decoded = result.data?.cipher ? await decryptWithPairKey(result.data.cipher, settings.pairingKey) : null
@@ -151,16 +205,19 @@ async function fetchCollections() {
       ? decoded.filter((entry) => typeof entry.id === 'string' && typeof entry.title === 'string')
       : (Array.isArray(decoded?.collections) ? decoded.collections.filter((entry) => typeof entry.id === 'string' && typeof entry.title === 'string').map((entry) => ({ ...entry, parentId: typeof entry.parentId === 'string' ? entry.parentId : null })) : [])
     const serverBookmarks = Array.isArray(decoded?.bookmarks) ? decoded.bookmarks.filter((entry) => typeof entry.id === 'string' && typeof entry.title === 'string' && typeof entry.url === 'string' && /^https?:\/\//i.test(entry.url)) : []
+    const credentialFingerprints = Array.isArray(decoded?.credentialFingerprints) ? decoded.credentialFingerprints.filter((entry) => typeof entry === 'string') : []
 
     // Merge any locally created collections
     const custom = Array.isArray(stored.customCollections) ? stored.customCollections : []
     const mergedCollections = [...serverCollections]
     for (const c of custom) {
-      if (!mergedCollections.some((sc) => sc.id === c.id || sc.title.toLowerCase() === c.title.toLowerCase())) {
+      // Names are not unique: nested collections can have the same title.
+      // Only IDs identify the same collection.
+      if (!mergedCollections.some((sc) => sc.id === c.id)) {
         mergedCollections.push(c)
       }
     }
-    const fresh = { collections: mergedCollections, bookmarks: serverBookmarks }
+    const fresh = { collections: mergedCollections, bookmarks: serverBookmarks, credentialFingerprints }
     if (JSON.stringify(fresh) !== JSON.stringify(cached)) await chrome.storage.local.set({ snapshotCache: fresh, snapshotCacheOwner: owner })
     return fresh
   } catch (error) {
@@ -194,14 +251,14 @@ chrome.runtime.onMessage.addListener((message, sender, respond) => {
     }
     const apiOrigin = message.apiOrigin || null
     void (async () => {
-      const previous = await chrome.storage.local.get(['pairingKey', 'snapshotCache', 'snapshotCacheOwner', 'recentItems', 'apiOrigin'])
+      const previous = await chrome.storage.local.get(['pairingKey', 'snapshotCache', 'snapshotCacheOwner', 'recentItems', 'apiOrigin', 'savedCredentialFingerprints'])
       const toSet = { pairingKey: key }
       if (apiOrigin) toSet.apiOrigin = apiOrigin
       await chrome.storage.local.set(toSet)
       try {
         await fetchCollections()
         if (previous.pairingKey !== key) {
-          await chrome.storage.local.remove('recentItems')
+          await chrome.storage.local.remove(['recentItems', 'savedCredentialFingerprints'])
         }
         respond({ ok: true })
       } catch (error) {
@@ -253,7 +310,7 @@ chrome.runtime.onMessage.addListener((message, sender, respond) => {
   }
   if (message?.type === 'vault-unpair') {
     void Promise.all([
-      chrome.storage.local.remove(['pairingKey', 'snapshotCache', 'snapshotCacheOwner', 'recentItems']),
+      chrome.storage.local.remove(['pairingKey', 'snapshotCache', 'snapshotCacheOwner', 'recentItems', 'savedCredentialFingerprints']),
       chrome.storage.session.remove('pendingCredentialPrompts'),
     ]).then(() => respond({ ok: true }))
     return true
@@ -285,6 +342,10 @@ chrome.runtime.onMessage.addListener((message, sender, respond) => {
     void chrome.storage.local.get(['pairingKey', 'alwaysSave']).then(async (settings) => {
       if (!settings.pairingKey) {
         respond({ ok: false, mode: 'unpaired', error: 'Open the extension to pair it with Vault.' })
+        return
+      }
+      if (message.capture?.type === 'password' && await credentialAlreadySaved(message.capture, settings.pairingKey)) {
+        respond({ ok: true, mode: 'existing' })
         return
       }
       if (settings.alwaysSave) {

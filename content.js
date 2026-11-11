@@ -139,19 +139,57 @@
     fields.className = 'prompt-fields'
 
     const userLabel = document.createElement('label')
-    userLabel.textContent = 'Username / Email'
     const userInput = document.createElement('input')
     userInput.type = 'text'
     userInput.value = capture.username || ''
     userInput.placeholder = 'Username or email'
+    const saveUsername = document.createElement('input')
+    saveUsername.type = 'checkbox'
+    saveUsername.checked = Boolean(capture.username)
+    const usernameChoice = document.createElement('span')
+    usernameChoice.className = 'prompt-choice'
+    usernameChoice.append(saveUsername, document.createTextNode(' Save username'))
+    userLabel.append(usernameChoice)
     userLabel.append(userInput)
+    userInput.disabled = !saveUsername.checked
+    saveUsername.addEventListener('change', () => { userInput.disabled = !saveUsername.checked })
 
     const passLabel = document.createElement('label')
-    passLabel.textContent = 'Password'
     const passInput = document.createElement('input')
     passInput.type = 'password'
     passInput.value = capture.password || ''
-    passLabel.append(passInput)
+    passInput.autocomplete = 'new-password'
+    const savePassword = document.createElement('input')
+    savePassword.type = 'checkbox'
+    savePassword.checked = true
+    const passwordChoice = document.createElement('span')
+    passwordChoice.className = 'prompt-choice'
+    passwordChoice.append(savePassword, document.createTextNode(' Save password'))
+    passLabel.append(passwordChoice)
+    const secretRow = document.createElement('span')
+    secretRow.className = 'prompt-secret-row'
+    const previewButton = document.createElement('button')
+    previewButton.type = 'button'
+    previewButton.className = 'prompt-preview'
+    previewButton.textContent = 'Preview'
+    previewButton.setAttribute('aria-pressed', 'false')
+    previewButton.addEventListener('click', () => {
+      const visible = passInput.type === 'password'
+      passInput.type = visible ? 'text' : 'password'
+      previewButton.textContent = visible ? 'Hide' : 'Preview'
+      previewButton.setAttribute('aria-pressed', String(visible))
+    })
+    secretRow.append(passInput, previewButton)
+    passLabel.append(secretRow)
+    passInput.disabled = !savePassword.checked
+    savePassword.addEventListener('change', () => {
+      passInput.disabled = !savePassword.checked
+      if (!savePassword.checked) {
+        passInput.type = 'password'
+        previewButton.textContent = 'Preview'
+        previewButton.setAttribute('aria-pressed', 'false')
+      }
+    })
 
     const collectionLabel = document.createElement('label')
     collectionLabel.textContent = 'Collection'
@@ -162,33 +200,42 @@
     void loadCollections().then((snapshot) => {
       if (!snapshot?.ok) return
       const byId = new Map((snapshot.collections || []).map((entry) => [entry.id, entry]))
-      const pathFor = (entry) => entry.parentId && byId.has(entry.parentId) ? `${pathFor(byId.get(entry.parentId))} / ${entry.title}` : entry.title
+      const pathFor = (entry, seen = new Set()) => { if (seen.has(entry.id)) return entry.title; seen.add(entry.id); return entry.parentId && byId.has(entry.parentId) ? `${pathFor(byId.get(entry.parentId), seen)} / ${entry.title}` : entry.title }
       for (const entry of snapshot.collections || []) collectionSelect.add(new Option(pathFor(entry), entry.id))
     }).catch(() => undefined)
 
     const actions = document.createElement('div')
     actions.className = 'prompt-actions'
+    const promptStatus = document.createElement('p')
+    promptStatus.className = 'prompt-status'
+    promptStatus.setAttribute('role', 'alert')
 
     const saveBtn = document.createElement('button')
     saveBtn.type = 'button'
     saveBtn.className = 'primary'
     saveBtn.textContent = 'Save'
     saveBtn.addEventListener('click', async () => {
+      if (!saveUsername.checked && !savePassword.checked) {
+        promptStatus.textContent = 'Select at least one field to save.'
+        return
+      }
       saveBtn.disabled = true
       saveBtn.textContent = 'Saving…'
       void playOverlay(preferences.effect)
       const toSave = {
         ...capture,
-        username: userInput.value.trim(),
-        password: passInput.value,
+        username: saveUsername.checked ? userInput.value.trim() : '',
+        password: savePassword.checked ? passInput.value : '',
         collectionId: collectionSelect.value || null,
       }
       const res = await chrome.runtime.sendMessage({ type: 'vault-save-capture', capture: toSave, pendingId })
-      closePrompt()
       if (res?.ok) {
+        closePrompt()
         showToast('Password saved to Markanm Vault.')
       } else {
-        showToast(res?.error || 'Unable to save password.', true)
+        saveBtn.disabled = false
+        saveBtn.textContent = 'Save selected'
+        promptStatus.textContent = res?.error || 'Unable to save password.'
       }
     })
 
@@ -209,12 +256,12 @@
     editBtn.addEventListener('click', () => {
       closePrompt()
       void openSaveDialog(capture.url, capture.title, {
-        passwordCapture: { ...capture, username: userInput.value.trim(), password: passInput.value },
+        passwordCapture: { ...capture, username: saveUsername.checked ? userInput.value.trim() : '', password: savePassword.checked ? passInput.value : '' },
         pendingId
       })
     })
 
-    box.append(head, subtitle, fields, actions, editBtn)
+    box.append(head, subtitle, fields, promptStatus, actions, editBtn)
     shadow.append(box)
   }
 
@@ -378,7 +425,7 @@
       status.textContent=items?.error || 'Unable to load collections. You can still save or pair in Vault settings.'
     } else {
       const byId=new Map((items.collections||[]).map((entry)=>[entry.id,entry]))
-      const pathFor=(entry)=>entry.parentId&&byId.has(entry.parentId)?`${pathFor(byId.get(entry.parentId))} / ${entry.title}`:entry.title
+    const pathFor=(entry,seen=new Set())=>{if(seen.has(entry.id))return entry.title;seen.add(entry.id);return entry.parentId&&byId.has(entry.parentId)?`${pathFor(byId.get(entry.parentId),seen)} / ${entry.title}`:entry.title}
       for(const entry of items.collections || []) collection.add(new Option(pathFor(entry),entry.id))
       status.textContent=items.stale?`Using cached collections. ${items.error}`:'Choose a type and collection, then save.'
     }
@@ -454,6 +501,10 @@
     if (!capture) return
     lastCredentialCaptureAt = Date.now()
     void chrome.runtime.sendMessage({ type: 'vault-detected-capture', capture }).then((result) => {
+      if (result?.mode === 'existing') {
+        showToast('This login is already saved in Markanm Vault.')
+        return
+      }
       if (result?.mode === 'saved') return
       if (result?.mode === 'unpaired') {
         showToast('Pair Markanm Vault from the extension popup before saving logins.', true)
